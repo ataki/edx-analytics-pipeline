@@ -149,6 +149,7 @@
     - name: task run (fire and forget)
       shell: >
         . /home/hadoop/.bashrc && {{ working_venv_dir }}/bin/launch-task {{ task_arguments }} >{{ log_dir }}/stdout 2>{{ log_dir }}/stderr chdir={{ working_repo_dir }}
+        executable=/bin/bash
       async: 10000000000
       poll: 0
       sudo: True
@@ -158,6 +159,7 @@
     - name: task run (wait for completion)
       shell: >
         . /home/hadoop/.bashrc && {{ working_venv_dir }}/bin/launch-task {{ task_arguments }} >{{ log_dir }}/stdout 2>{{ log_dir }}/stderr chdir={{ working_repo_dir }}
+        executable=/bin/bash
       async: 10000000000
       poll: 10
       sudo: True
