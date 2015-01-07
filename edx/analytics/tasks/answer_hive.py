@@ -492,6 +492,7 @@ class MultipartitionJsonHiveTableTask(HiveTableTask):
             location=self.table_location,
             table_format=self.table_format,
             partition_key=self.partition.key,
+            recover_partitions=self.recover_partitions,
         )
 
         query = textwrap.dedent(query)
@@ -504,6 +505,7 @@ class MultipartitionJsonHiveTableTask(HiveTableTask):
 
     @property
     def recover_partitions(self):
+        # TODO: make this sensitive to the underlying client.
         return 'ALTER TABLE {table} RECOVER PARTITIONS;'.format(table=self.table)
 
     @property
