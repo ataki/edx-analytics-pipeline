@@ -618,7 +618,7 @@ class HiveAnswerTableFromQueryTask(AllProblemCheckEventsParamMixin, HiveTableTas
 
     @property
     def query(self):
-        create_table_statements = super(HiveTableFromQueryTask, self).query()
+        create_table_statements = super(HiveAnswerTableFromQueryTask, self).query()
         full_insert_query = """
             INSERT INTO TABLE {table}
             PARTITION ({partition.query_spec})
