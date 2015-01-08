@@ -844,6 +844,10 @@ class AnswerDistOneFilePerCourseTask(AllProblemCheckEventsParamMixin, MultiOutpu
             warehouse_path=self.warehouse_path,
         )
 
+    def extra_modules(self):
+        import six
+        return [html5lib, six]
+
     def mapper(self, line):
         """
         Groups inputs by course_id, writes all records with the same course_id to the same output file.
