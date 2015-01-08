@@ -616,7 +616,6 @@ class HiveAnswerTableFromQueryTask(AllProblemCheckEventsParamMixin, HiveTableTas
     def partition(self):
         return HivePartition('dt', self.interval.date_b.isoformat())  # pylint: disable=no-member
 
-    @property
     def query(self):
         create_table_statements = super(HiveAnswerTableFromQueryTask, self).query()
         full_insert_query = """
