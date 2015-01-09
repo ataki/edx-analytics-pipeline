@@ -232,7 +232,8 @@ class AllProblemCheckEventsTask(AllProblemCheckEventsParamMixin, EventLogSelecti
         # Also, course_user_tags is just a string representation of a dict.  Placeholder....
         # Yuck.  It won't work like this.  There are embedded newlines, and lots of non-ascii characters.
         # answer_string = '\t'.join([str(answer.get(value, "")) for value in self.COLUMN_NAMES])
-        answer_string = json.dumps(answer)
+        # answer_string = json.dumps(answer)
+        answer_string = '\t'.join([answer.get(value, u'').encode('utf-8') for value in self.COLUMN_NAMES])
         output_file.write(answer_string)
         output_file.write("\n")
 
@@ -248,8 +249,6 @@ class AllProblemCheckEventsTask(AllProblemCheckEventsParamMixin, EventLogSelecti
 
         See docstring for reducer() for more details.
         """
-        # print "Generating answers from event string %s" % event_string
-        # event_string = event_string.decode('utf-8')
         event_string = event_string[0]
         event = json.loads(event_string)
 
@@ -286,8 +285,11 @@ class AllProblemCheckEventsTask(AllProblemCheckEventsParamMixin, EventLogSelecti
             def cleaned(value):
                 if isinstance(value, basestring):
                     return value.replace('\t', '\\t').replace('\n', '\\n')
+                elif isinstance(value, dict):
+                    # Convert 'course_user_tags' to a json string.
+                    return json.dumps(value).replace('\t', '\\t').replace('\n', '\\n')
                 else:
-                    return value
+                    return unicode(value)
 
             clean_answer = {key : cleaned(answer[key]) for key in answer}
             results.append(clean_answer)
@@ -467,7 +469,7 @@ def stringify_value(answer_value, contains_html=False):
 class MultipartitionJsonHiveTableTask(HiveTableTask):
     """
     Abstract class to import JSON data into a Hive table with multiple partitions.
-
+# TODO: switch names to non-JSON as well...
     """
 
     def query(self):
@@ -501,7 +503,8 @@ class MultipartitionJsonHiveTableTask(HiveTableTask):
 
     @property
     def define_jars(self):
-        return 'add jar s3://elasticmapreduce/samples/hive-ads/libs/jsonserde.jar;'
+        # return 'add jar s3://elasticmapreduce/samples/hive-ads/libs/jsonserde.jar;'
+        return ''
 
     @property
     def recover_partitions(self):
@@ -528,14 +531,14 @@ class MultipartitionJsonHiveTableTask(HiveTableTask):
     @property
     def table_format(self):
         """Provides format of Hive database table's data."""
-        # return "ROW FORMAT DELIMITED FIELDS TERMINATED BY '\\t'"
+        return "ROW FORMAT DELIMITED FIELDS TERMINATED BY '\\t'"
         # TODO: parameterize serde name.
-        col_spec=','.join([c[0] for c in self.columns])
-        serde_name = "com.amazon.elasticmapreduce.JsonSerde"
-        return "row format serde '{serde_name}' with serdeproperties ('paths'='{col_spec}')".format(
-            serde_name=serde_name,
-            col_spec=col_spec
-        )
+        #col_spec=','.join([c[0] for c in self.columns])
+        #serde_name = "com.amazon.elasticmapreduce.JsonSerde"
+        #return "row format serde '{serde_name}' with serdeproperties ('paths'='{col_spec}')".format(
+        #    serde_name=serde_name,
+        #    col_spec=col_spec
+        #)
 
     @property
     def table_location(self):
@@ -920,7 +923,8 @@ class AnswerDistOneFilePerCourseTask(AllProblemCheckEventsParamMixin, MultiOutpu
         row_data = sorted(row_data, key=itemgetter(*field_names))
 
         for row_dict in row_data:
-            encoded_dict = dict()
-            for key, value in row_dict.iteritems():
-                encoded_dict[key] = unicode(value).encode('utf8')
-            writer.writerow(encoded_dict)
+            #encoded_dict = dict()
+            #for key, value in row_dict.iteritems():
+            #    encoded_dict[key] = unicode(value).encode('utf8')
+            #writer.writerow(encoded_dict)
+            writer.writerow(row_dict)
