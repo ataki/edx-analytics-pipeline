@@ -195,6 +195,7 @@ class AllProblemCheckEventsTask(AllProblemCheckEventsParamMixin, EventLogSelecti
                 self._output_answer(answer, output_file)
 
     COLUMN_NAMES = [
+        'time',
         # Info about problem:
         'course_id',
         'problem_id',
@@ -206,13 +207,13 @@ class AllProblemCheckEventsTask(AllProblemCheckEventsParamMixin, EventLogSelecti
         'course_user_tags',
         'variant',
         # Info about answer:
-        'timestamp',
         'correct',
         'answer',
         'answer_value_id',
         'answer_uses_value_id',
         'grouping_key',
         'uses_submission',
+        'should_include_answer',
     ]
 
     def _output_answer(self, answer, output_file):
