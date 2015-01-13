@@ -670,7 +670,7 @@ class LatestProblemInfo(HiveAnswerTableFromQueryTask):
           ON (aat.course_id = latest.course_id
               AND aat.part_id = latest.part_id
               AND aat.time = latest.latest_time)
-        WHERE aat.should_include_answer = 'true' AND aat.uses_submission = 'true'
+        WHERE aat.should_include_answer = 'True' AND aat.uses_submission = 'True'
         """
 
     def requires(self):
@@ -707,8 +707,8 @@ class LatestAnswerInfo(HiveAnswerTableFromQueryTask):
     def insert_query(self):
         return """
         SELECT aat.course_id, aat.part_id, aat.grouping_key, aat.variant, aat.correct, aat.time,
-            IF(lpi.answer_uses_value_id='true' OR aat.uses_submission='true', aat.answer, aat.answer_value_id) as answer_value, 
-            IF(lpi.answer_uses_value_id='true' OR aat.uses_submission='true', aat.answer_value_id, aat.answer) as value_id
+            IF(lpi.answer_uses_value_id='True' OR aat.uses_submission='True', aat.answer, aat.answer_value_id) as answer_value, 
+            IF(lpi.answer_uses_value_id='True' OR aat.uses_submission='True', aat.answer_value_id, aat.answer) as value_id
         FROM all_answers aat
         INNER JOIN (
             SELECT max(time) as max_time, course_id, part_id, grouping_key
