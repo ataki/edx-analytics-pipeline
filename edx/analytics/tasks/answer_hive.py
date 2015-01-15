@@ -989,7 +989,7 @@ class LatestExperimentAnswerDist(HiveAnswerTableFromQueryTask):
         SELECT la.course_id, la.part_id,
                lai.variant, lai.is_correct, lai.answer_value, lai.value_id,
                count(la.user_id) as count,
-               lpi.problem_id, lpi.question, lpi.problem_display_name, lue.exp_id, lue.group_id
+               lpi.problem_id, lpi.question, lpi.problem_display_name, lue.experiment_id, lue.group_id
         FROM latest_answers la
         INNER JOIN latest_problem_info lpi
             ON (lpi.course_id = la.course_id AND lpi.part_id = la.part_id)
@@ -1001,7 +1001,7 @@ class LatestExperimentAnswerDist(HiveAnswerTableFromQueryTask):
                 AND lue.user_id = la.user_id)
         GROUP BY la.course_id, la.part_id, la.grouping_key,
                 lai.variant, lai.is_correct, lai.answer_value, lai.value_id,
-                lpi.problem_id, lpi.question, lpi.problem_display_name, lue.exp_id, lue.group_id
+                lpi.problem_id, lpi.question, lpi.problem_display_name, lue.experiment_id, lue.group_id
         """
 
     def requires(self):
