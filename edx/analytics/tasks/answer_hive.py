@@ -1129,7 +1129,7 @@ class ExperimentAnswerDistOneFilePerCourseTask(AllProblemCheckEventsParamMixin, 
             writer.writerow(row_dict)
 
 
-class AnswerDistributionFromHiveToMySQLTaskWorkflow(AllProblemCheckEventsParamMixin, MysqlInsertTask):
+class AnswerDistributionFromHiveToMySQLTaskWorkflow(AllProblemCheckEventsParamMixin, WarehouseMixin, MysqlInsertTask):
     """
     Define answer_distribution_from_hive table.
     """
