@@ -1217,6 +1217,7 @@ class AnswerDistributionFromHiveToMySQLTaskWorkflow(AllProblemCheckEventsParamMi
 
 class HiveAnswerDistributionWorkflow(
         AllProblemCheckEventsParamMixin,
+        WarehouseMixin,
         MysqlInsertTaskMixin,
         luigi.WrapperTask):
     """Calculate answer distribution and output to files and to database."""
