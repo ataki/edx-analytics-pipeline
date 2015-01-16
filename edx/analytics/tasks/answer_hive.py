@@ -16,6 +16,7 @@ from luigi.configuration import get_config
 
 from edx.analytics.tasks.answer_dist import (
     get_text_from_html,
+    try_str_to_float,
 )
 from edx.analytics.tasks.mapreduce import MapReduceJobTask, MultiOutputMapReduceJobTask, MapReduceJobTaskMixin
 from edx.analytics.tasks.pathutil import EventLogSelectionDownstreamMixin, EventLogSelectionMixin
@@ -1125,8 +1126,130 @@ class ExperimentAnswerDistOneFilePerCourseTask(AllProblemCheckEventsParamMixin, 
         row_data = sorted(row_data, key=itemgetter(*field_names))
 
         for row_dict in row_data:
-            #encoded_dict = dict()
-            #for key, value in row_dict.iteritems():
-            #    encoded_dict[key] = unicode(value).encode('utf8')
-            #writer.writerow(encoded_dict)
             writer.writerow(row_dict)
+
+
+class AnswerDistributionFromHiveToMySQLTaskWorkflow(AllProblemCheckEventsParamMixin, MysqlInsertTask):
+    """
+    Define answer_distribution_from_hive table.
+    """
+    @property
+    def table(self):
+        return "answer_distribution_from_hive"
+
+    def rows(self):
+        """
+        Re-formats the output of AnswerDistributionPerCourse to something insert_rows can understand
+        """
+        with self.input()['insert_source'].open('r') as fobj:
+            for line in fobj:
+                (course_id, part_id, variant, is_correct, answer_value,
+                 value_id, count, problem_id, question, display_name) = line.strip('\n').split('\t')
+                # output is in a different order, and has extra value.
+                output_list = [
+                    course_id,
+                    problem_id,
+                    part_id,
+                    is_correct,
+                    count,
+                    value_id,
+                    answer_value,
+                    try_str_to_float(answer_value),
+                    variant,
+                    display_name,
+                    question,
+                ]
+                yield output_list
+
+    @property
+    def columns(self):
+        # Note that this does not align with the set of columns in Hive, so we cannot
+        # assume that they're the same.
+        return [
+            ('course_id', 'VARCHAR(255) NOT NULL'),
+            ('module_id', 'VARCHAR(255) NOT NULL'),
+            ('part_id', 'VARCHAR(255) NOT NULL'),
+            ('correct', 'TINYINT(1) NOT NULL'),
+            ('count', 'INT(11) NOT NULL'),
+            ('value_id', 'VARCHAR(255)'),
+            ('answer_value_text', 'LONGTEXT'),
+            ('answer_value_numeric', 'DOUBLE'),
+            ('variant', 'INT(11)'),
+            ('problem_display_name', 'LONGTEXT'),
+            ('question_text', 'LONGTEXT'),
+        ]
+
+    @property
+    def indexes(self):
+        return [
+            ('course_id',),
+            ('module_id',),
+            ('part_id',),
+        ]
+
+    def init_copy(self, connection):
+        """
+        Truncate the table before re-writing
+        """
+        # Use "DELETE" instead of TRUNCATE since TRUNCATE forces an implicit commit before it executes which would
+        # commit the currently open transaction before continuing with the copy.
+        query = "DELETE FROM {table}".format(table=self.table)
+        connection.cursor().execute(query)
+
+    @property
+    def insert_source_task(self):
+        """
+        Write to answer_distribution table from AnswerDistributionTSVTask.
+        """
+        return LatestAnswerDist(
+            mapreduce_engine=self.mapreduce_engine,
+            n_reduce_tasks=self.n_reduce_tasks,
+            source=self.source,
+            interval=self.interval,
+            pattern=self.pattern,
+            warehouse_path=self.warehouse_path,
+        )
+
+    def extra_modules(self):
+        import six
+        return [html5lib, six]
+
+
+class HiveAnswerDistributionWorkflow(
+        AllProblemCheckEventsParamMixin,
+        MysqlInsertTaskMixin,
+        luigi.WrapperTask):
+    """Calculate answer distribution and output to files and to database."""
+
+    # Add additional args for MultiOutputMapReduceJobTask.
+    output_root = luigi.Parameter()
+
+    def requires(self):
+        kwargs = {
+            'mapreduce_engine': self.mapreduce_engine,
+            'n_reduce_tasks': self.n_reduce_tasks,
+            'source': self.source,
+            'interval': self.interval,
+            'pattern': self.pattern,
+            'warehouse_path': self.warehouse_path,
+        }
+
+        # Add additional args for MultiOutputMapReduceJobTask.
+        kwargs1 = {
+            'output_root': self.output_root,
+        }
+        kwargs1.update(kwargs)
+
+        # Add additional args for MysqlInsertTaskMixin.
+        kwargs2 = {
+            'database': self.database,
+            'credentials': self.credentials,
+            'insert_chunk_size': self.insert_chunk_size,
+        }
+        kwargs2.update(kwargs)
+
+        yield (
+            AnswerDistOneFilePerCourseTask(**kwargs1),
+            ExperimentAnswerDistOneFilePerCourseTask(**kwargs1),
+            AnswerDistributionFromHiveToMySQLTaskWorkflow(**kwargs2),
+        )
