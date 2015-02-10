@@ -14,7 +14,7 @@ from mock import Mock, call
 from opaque_keys.edx.locator import CourseLocator
 
 from edx.analytics.tasks.answer_dist import (
-    LastProblemCheckEventMixin,
+    ProblemCheckEventMixin,
     AnswerDistributionPerCourseMixin,
     AnswerDistributionOneFilePerCourseTask,
     try_str_to_float,
@@ -24,8 +24,8 @@ from edx.analytics.tasks.tests.config import with_luigi_config, OPTION_REMOVED
 from edx.analytics.tasks.tests.opaque_key_mixins import InitializeOpaqueKeysMixin, InitializeLegacyKeysMixin
 
 
-class LastProblemCheckEventBaseTest(unittest.TestCase):
-    """Base test class for testing LastProblemCheckEventMixin."""
+class ProblemCheckEventBaseTest(unittest.TestCase):
+    """Base test class for testing ProblemCheckEventMixin."""
 
     def initialize_ids(self):
         """Define set of id values for use in tests."""
@@ -33,10 +33,11 @@ class LastProblemCheckEventBaseTest(unittest.TestCase):
 
     def setUp(self):
         self.initialize_ids()
-        self.task = LastProblemCheckEventMixin()
+        self.task = ProblemCheckEventMixin()
         self.username = 'test_user'
         self.user_id = 24
         self.timestamp = "2013-12-17T15:38:32.805444"
+        self.earlier_timestamp = "2013-12-15T15:38:32.805444"
         self.key = (self.course_id, self.problem_id, self.username)
 
     def _create_event_log_line(self, **kwargs):
@@ -120,7 +121,7 @@ class LastProblemCheckEventBaseTest(unittest.TestCase):
         return event_dict
 
 
-class LastProblemCheckEventMapTest(InitializeOpaqueKeysMixin, LastProblemCheckEventBaseTest):
+class ProblemCheckEventMapTest(InitializeOpaqueKeysMixin, ProblemCheckEventBaseTest):
     """Tests to verify that event log parsing by mapper works correctly."""
 
     def assert_no_output_for(self, line):
@@ -201,14 +202,14 @@ class LastProblemCheckEventMapTest(InitializeOpaqueKeysMixin, LastProblemCheckEv
         self.assertEquals(actual_data, expected_data)
 
 
-class LastProblemCheckEventLegacyMapTest(InitializeLegacyKeysMixin, LastProblemCheckEventMapTest):
+class ProblemCheckEventLegacyMapTest(InitializeLegacyKeysMixin, ProblemCheckEventMapTest):
     """Run same mapper() tests, but using legacy values for keys."""
     pass
 
 
-class LastProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, LastProblemCheckEventBaseTest):
+class ProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, ProblemCheckEventBaseTest):
     """
-    Verify that LastProblemCheckEventMixin.reduce() works correctly.
+    Verify that ProblemCheckEventMixin.reduce() works correctly.
     """
 
     def _get_reducer_output(self, values):
@@ -230,10 +231,12 @@ class LastProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, LastProblemChec
         for key, value in reducer_output:
             course_id, answer_id = key
             timestamp, answer_data = value
+            answer_data = json.loads(answer_data)
+            expected_key = "{id}_{is_first}".format(id=answer_id, is_first=1 if answer_data["is_first"] else 0)
             self.assertEquals(course_id, self.course_id)
             self.assertEquals(timestamp, self.timestamp)
-            self.assertTrue(answer_id in expected)
-            self.assertEquals(json.loads(answer_data), expected.get(answer_id))
+            self.assertTrue(expected_key in expected)
+            self.assertEquals(answer_data, expected.get(expected_key))
 
     def _add_second_answer(self, problem_data, answer_id=None):
         """Adds a second answer to an existing problem check event."""
@@ -275,32 +278,53 @@ class LastProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, LastProblemChec
         problem_data['submission'] = problem_data_submission
         return problem_data
 
-    def _get_answer_data_from_submission(self, problem_data, **kwargs):
+    def _get_answer_data_from_submissions(self, problem_data, **kwargs):
         """Returns expected answer data returned by the reducer, given the event's data."""
-        print problem_data
-        answer_data = {}
-        problem_data_submission = problem_data['submission']
-        print problem_data_submission
-        for answer_id in problem_data_submission:
-            problem_data_sub = problem_data_submission[answer_id]
-            print problem_data_sub
-            answer_id_data = {
-                "answer": problem_data_sub['answer'],
-                "problem_display_name": None,
-                "variant": problem_data_sub['variant'],
-                "correct": problem_data_sub['correct'],
-                "input_type": problem_data_sub['input_type'],
-                "response_type": problem_data_sub['response_type'],
-                "question": problem_data_sub['question'],
-                "problem_id": self.problem_id,
-            }
-            if 'answer_value_id' in problem_data_sub:
-                answer_id_data['answer_value_id'] = problem_data_sub['answer_value_id']
 
-            self._update_with_kwargs(answer_id_data, **kwargs)
-            answer_data[answer_id] = answer_id_data
+        answer_data = {}
+        
+        first_submission = problem_data[0]['submission']
+        last_submission = problem_data[-1]['submission']
+
+        def insert_answer_data(submission, is_first):
+            for answer_id in submission:
+                submission_data = submission[answer_id]
+
+                answer_id_data = {
+                    "answer": submission_data['answer'],
+                    "problem_display_name": None,
+                    "variant": submission_data['variant'],
+                    "correct": submission_data['correct'],
+                    "input_type": submission_data['input_type'],
+                    "response_type": submission_data['response_type'],
+                    "question": submission_data['question'],
+                    "problem_id": self.problem_id,
+                    "is_first": is_first,
+                }
+                if 'answer_value_id' in submission_data:
+                    answer_id_data['answer_value_id'] = submission_data['answer_value_id']
+
+                self._update_with_kwargs(answer_id_data, **kwargs)
+                answer_data[self._get_submission_data_key(answer_id, is_first)] = answer_id_data
+
+        insert_answer_data(first_submission, 1)
+        insert_answer_data(last_submission, 0)
 
         return answer_data
+
+    def _augment_single_submission_data(self, answer_data):
+        """ Replicate response of ProblemCheckEventMixin.reduce on single submission. """
+        first_response = answer_data.copy()
+        last_response = answer_data.copy()
+
+        first_response['is_first'] = 1
+        last_response['is_first'] = 0
+
+        return first_response, last_response
+
+    def _get_submission_data_key(self, answer_id, is_first):
+        """ Construct key to distinguish identical first and last responses. """
+        return "{id}_{is_first}".format(id=answer_id, is_first=is_first)
 
     def test_no_events(self):
         self._check_output([], tuple())
@@ -309,7 +333,13 @@ class LastProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, LastProblemChec
         problem_data = self._create_problem_data_dict()
         input_data = (self.timestamp, json.dumps(problem_data))
         answer_data = self._get_answer_data()
-        self._check_output([input_data], {self.answer_id: answer_data})
+        first, last = self._augment_single_submission_data(answer_data)
+
+        self._check_output([input_data], {
+                self._get_submission_data_key(self.answer_id, 1): first,
+                self._get_submission_data_key(self.answer_id, 0): last,
+            }
+        )
 
     def test_one_correct_answer_event(self):
         problem_data = self._create_problem_data_dict(
@@ -317,25 +347,30 @@ class LastProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, LastProblemChec
         )
         input_data = (self.timestamp, json.dumps(problem_data))
         answer_data = self._get_answer_data(correct=True)
-        self._check_output([input_data], {self.answer_id: answer_data})
+        first, last = self._augment_single_submission_data(answer_data)
 
+        self._check_output([input_data], {
+                self._get_submission_data_key(self.answer_id, 1): first,
+                self._get_submission_data_key(self.answer_id, 0): last,
+            }
+        )
     def test_one_submission_event(self):
         problem_data = self._create_submission_problem_data_dict()
         input_data = (self.timestamp, json.dumps(problem_data))
-        answer_data = self._get_answer_data_from_submission(problem_data)[self.answer_id]
-        self._check_output([input_data], {self.answer_id: answer_data})
+        answer_data = self._get_answer_data_from_submissions([problem_data])
+        self._check_output([input_data], answer_data)
 
     def test_one_submission_with_value_id(self):
         problem_data = self._create_submission_problem_data_dict(answer=3, answer_value_id='choice_3')
         input_data = (self.timestamp, json.dumps(problem_data))
-        answer_data = self._get_answer_data_from_submission(problem_data)[self.answer_id]
-        self._check_output([input_data], {self.answer_id: answer_data})
+        answer_data = self._get_answer_data_from_submissions([problem_data])
+        self._check_output([input_data], answer_data)
 
     def test_one_submission_with_variant(self):
         problem_data = self._create_submission_problem_data_dict(variant=629)
         input_data = (self.timestamp, json.dumps(problem_data))
-        answer_data = self._get_answer_data_from_submission(problem_data)[self.answer_id]
-        self._check_output([input_data], {self.answer_id: answer_data})
+        answer_data = self._get_answer_data_from_submissions([problem_data])
+        self._check_output([input_data], answer_data)
 
     def test_two_answer_event(self):
         problem_data = self._create_problem_data_dict()
@@ -343,9 +378,16 @@ class LastProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, LastProblemChec
         input_data = (self.timestamp, json.dumps(problem_data))
 
         answer_data = self._get_answer_data()
+        first_answer, last_answer = self._augment_single_submission_data(answer_data)
+
         answer_data_2 = self._get_answer_data(answer_value_id="4")
+        first_answer_2, last_answer_2 = self._augment_single_submission_data(answer_data_2)
+
         self._check_output([input_data], {
-            self.answer_id: answer_data, self.second_answer_id: answer_data_2
+            self._get_submission_data_key(self.answer_id, 1): first_answer, 
+            self._get_submission_data_key(self.second_answer_id, 1): first_answer_2,
+            self._get_submission_data_key(self.answer_id, 0): last_answer,
+            self._get_submission_data_key(self.second_answer_id, 0): last_answer_2,
         })
 
     def test_two_answer_submission_event(self):
@@ -359,8 +401,23 @@ class LastProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, LastProblemChec
             problem_data[key][self.second_answer_id] = problem_data_2[key][self.answer_id]
 
         input_data = (self.timestamp, json.dumps(problem_data))
-        answer_data = self._get_answer_data_from_submission(problem_data)
+        answer_data = self._get_answer_data_from_submissions([problem_data])
         self._check_output([input_data], answer_data)
+
+    def test_two_submission_event(self):
+        problem_data = self._create_submission_problem_data_dict()
+        problem_data_2 = self._create_submission_problem_data_dict(
+            answer='7',
+            time=self.earlier_timestamp,
+        )
+
+        input_data = [
+            (self.timestamp, json.dumps(problem_data)),
+            (self.earlier_timestamp, json.dumps(problem_data_2)),
+        ]
+
+        answer_data = self._get_answer_data_from_submissions([problem_data])
+        self._check_output(input_data, answer_data)
 
     def test_hidden_answer_event(self):
         for hidden_suffix in ['_dynamath', '_comment']:
@@ -370,9 +427,12 @@ class LastProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, LastProblemChec
             )
             self._add_second_answer(problem_data, answer_id=hidden_answer_id)
             input_data = (self.timestamp, json.dumps(problem_data))
-
             answer_data = self._get_answer_data()
-            self._check_output([input_data], {self.answer_id: answer_data})
+            first, last = self._augment_single_submission_data(answer_data)
+            self._check_output([input_data], {
+                self._get_submission_data_key(self.answer_id, 1): first,
+                self._get_submission_data_key(self.answer_id, 0): last,
+            })
 
     def test_bogus_choice_event(self):
         # In real data, values appeared in student_answers that were
@@ -393,10 +453,17 @@ class LastProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, LastProblemChec
         problem_data['context']['module'] = {'display_name': u"Displ\u0101y Name"}
         input_data = (self.timestamp, json.dumps(problem_data))
         answer_data = self._get_answer_data(problem_display_name=u"Displ\u0101y Name")
-        self._check_output([input_data], {self.answer_id: answer_data})
+
+        first, last = self._augment_single_submission_data(answer_data)
+
+        self._check_output([input_data], {
+                self._get_submission_data_key(self.answer_id, 1): first,
+                self._get_submission_data_key(self.answer_id, 0): last,
+            }
+        )
 
 
-class LastProblemCheckEventLegacyReduceTest(InitializeLegacyKeysMixin, LastProblemCheckEventReduceTest):
+class ProblemCheckEventLegacyReduceTest(InitializeLegacyKeysMixin, ProblemCheckEventReduceTest):
     """Run same reducer() tests, but using legacy values for keys."""
     pass
 
@@ -460,7 +527,8 @@ class AnswerDistributionPerCourseReduceTest(InitializeOpaqueKeysMixin, unittest.
         """Get an expected reducer output based on the input."""
         expected_output = {
             "Problem Display Name": answer_data.get('problem_display_name') or "",
-            "Count": 1,
+            "First Response Count": 1 if answer_data.get('is_first', False) else 0,
+            "Last Response Count": 1 if not answer_data.get('is_first', False) else 0,
             "PartID": self.answer_id,
             "Question": answer_data.get('question') or "",
             "AnswerValue": answer_data.get('answer') or answer_data.get('answer_value_id') or "",
@@ -620,14 +688,14 @@ class AnswerDistributionPerCourseReduceTest(InitializeOpaqueKeysMixin, unittest.
         answer_data = self._get_answer_data()
         input_data_1 = (self.earlier_timestamp, json.dumps(answer_data))
         input_data_2 = (self.timestamp, json.dumps(answer_data))
-        expected_output = self._get_expected_output(answer_data, Count=2)
+        expected_output = self._get_expected_output(answer_data, **{'Last Response Count' : 2})
         self._check_output([input_data_1, input_data_2], (expected_output,))
 
     def test_two_answer_event_same_reversed(self):
         answer_data = self._get_answer_data()
         input_data_1 = (self.earlier_timestamp, json.dumps(answer_data))
         input_data_2 = (self.timestamp, json.dumps(answer_data))
-        expected_output = self._get_expected_output(answer_data, Count=2)
+        expected_output = self._get_expected_output(answer_data, **{'Last Response Count' : 2})
         self._check_output([input_data_2, input_data_1], (expected_output,))
 
     def test_two_answer_event_same_old_and_new(self):
@@ -635,7 +703,7 @@ class AnswerDistributionPerCourseReduceTest(InitializeOpaqueKeysMixin, unittest.
         answer_data_2 = self._get_answer_data()
         input_data_1 = (self.earlier_timestamp, json.dumps(answer_data_1))
         input_data_2 = (self.timestamp, json.dumps(answer_data_2))
-        expected_output = self._get_expected_output(answer_data_2, Count=2)
+        expected_output = self._get_expected_output(answer_data_2, **{'Last Response Count' : 2})
         self._check_output([input_data_1, input_data_2], (expected_output,))
 
     def test_same_old_and_new_with_variant(self):
@@ -643,7 +711,7 @@ class AnswerDistributionPerCourseReduceTest(InitializeOpaqueKeysMixin, unittest.
         answer_data_2 = self._get_answer_data(variant=123)
         input_data_1 = (self.earlier_timestamp, json.dumps(answer_data_1))
         input_data_2 = (self.timestamp, json.dumps(answer_data_2))
-        expected_output = self._get_expected_output(answer_data_2, Count=2)
+        expected_output = self._get_expected_output(answer_data_2, **{'Last Response Count' : 2})
         self._check_output([input_data_1, input_data_2], (expected_output,))
 
     def test_two_answer_event_different_answer(self):
@@ -660,7 +728,7 @@ class AnswerDistributionPerCourseReduceTest(InitializeOpaqueKeysMixin, unittest.
         answer_data_2 = self._get_answer_data(answer="first")
         input_data_1 = (self.earlier_timestamp, json.dumps(answer_data_1))
         input_data_2 = (self.timestamp, json.dumps(answer_data_2))
-        expected_output = self._get_expected_output(answer_data_2, Count=2)
+        expected_output = self._get_expected_output(answer_data_2, **{'Last Response Count' : 2})
         self._check_output([input_data_1, input_data_2], (expected_output,))
 
     def test_two_answer_event_different_old_and_new(self):
