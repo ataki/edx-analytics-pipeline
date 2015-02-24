@@ -107,21 +107,22 @@ class ProblemCheckEventMixin(object):
         # Get the first entry.
         _timestamp, first_event = values[0]
 
-        for answer in self._generate_answers(first_event, True):
+        for answer in self._generate_answers(first_event, is_first_event=True):
             yield answer
 
         # Get the last entry.
         _timestamp, most_recent_event = values[-1]
 
-        for answer in self._generate_answers(most_recent_event, False):
+        for answer in self._generate_answers(most_recent_event, is_first_event=False):
             yield answer
 
-    def _generate_answers(self, event_string, is_first):
+    def _generate_answers(self, event_string, is_first_event):
         """
         Generates a list of answers given a problem_check event.
 
         Args:
             event_string:  a json-encoded string version of an event's data.
+            is_first_event: a boolean that is True for a user's first response to a question, False otherwise
 
         Returns:
             list of answer data tuples.
@@ -143,7 +144,7 @@ class ProblemCheckEventMixin(object):
             # not found in the submission:
             submission['problem_id'] = problem_id
             submission['problem_display_name'] = problem_display_name
-            submission['is_first'] = is_first
+            submission['is_first_event'] = is_first_event
 
             # Add the timestamp so that all responses can be sorted in order.
             # We want to use the "latest" values for some fields.
@@ -352,7 +353,7 @@ class AnswerDistributionPerCourseMixin(object):
                 }
 
             # For most cases, just increment a counter:
-            if answer.get('is_first', False):
+            if answer.get('is_first_event', False):
                 answer_dist[answer_grouping_key]['First Response Count'] += 1
             else:
                 answer_dist[answer_grouping_key]['Last Response Count'] += 1
@@ -379,7 +380,6 @@ class AnswerDistributionPerCourseMixin(object):
             'Variant',
             'Problem Display Name',
             'Question',
-            'First Response',
         ]
 
     def load_answer_metadata(self, answer_metadata_file):
@@ -611,7 +611,7 @@ class ProblemCheckEvent(
         BaseAnswerDistributionDownstreamMixin,
         ProblemCheckEventMixin,
         BaseAnswerDistributionTask):
-    """Identifies problem_check event for a user on a problem in a course, given raw event log input."""
+    """Identifies first and last problem_check events for a user on a problem in a course, given raw event log input."""
 
     def requires(self):
         return PathSetTask(self.src, self.include, self.manifest)

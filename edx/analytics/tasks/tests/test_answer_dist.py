@@ -232,7 +232,7 @@ class ProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, ProblemCheckEventBa
             course_id, answer_id = key
             timestamp, answer_data = value
             answer_data = json.loads(answer_data)
-            expected_key = "{id}_{is_first}".format(id=answer_id, is_first=1 if answer_data["is_first"] else 0)
+            expected_key = "{}_{}".format(answer_id, int(answer_data["is_first_event"]))
             self.assertEquals(course_id, self.course_id)
             self.assertEquals(timestamp, self.timestamp)
             self.assertTrue(expected_key in expected)
@@ -287,9 +287,14 @@ class ProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, ProblemCheckEventBa
         last_submission = problem_data[-1]['submission']
 
         def insert_answer_data(submission, is_first):
-            for answer_id in submission:
-                submission_data = submission[answer_id]
+            """ 
+            Inserts each response included in submission into the expected answer data dictionary. 
 
+            Args:
+                submission: dictionary of all responses submitted at once for a user
+                is_first: a boolean that is True for a user's first submission and False otherwise
+            """
+            for answer_id, submission_data in submission.iteritems():
                 answer_id_data = {
                     "answer": submission_data['answer'],
                     "problem_display_name": None,
@@ -299,7 +304,7 @@ class ProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, ProblemCheckEventBa
                     "response_type": submission_data['response_type'],
                     "question": submission_data['question'],
                     "problem_id": self.problem_id,
-                    "is_first": is_first,
+                    "is_first_event": is_first,
                 }
                 if 'answer_value_id' in submission_data:
                     answer_id_data['answer_value_id'] = submission_data['answer_value_id']
@@ -307,8 +312,8 @@ class ProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, ProblemCheckEventBa
                 self._update_with_kwargs(answer_id_data, **kwargs)
                 answer_data[self._get_submission_data_key(answer_id, is_first)] = answer_id_data
 
-        insert_answer_data(first_submission, 1)
-        insert_answer_data(last_submission, 0)
+        insert_answer_data(first_submission, is_first=1)
+        insert_answer_data(last_submission, is_first=0)
 
         return answer_data
 
@@ -317,8 +322,8 @@ class ProblemCheckEventReduceTest(InitializeOpaqueKeysMixin, ProblemCheckEventBa
         first_response = answer_data.copy()
         last_response = answer_data.copy()
 
-        first_response['is_first'] = 1
-        last_response['is_first'] = 0
+        first_response['is_first_event'] = 1
+        last_response['is_first_event'] = 0
 
         return first_response, last_response
 
@@ -527,8 +532,8 @@ class AnswerDistributionPerCourseReduceTest(InitializeOpaqueKeysMixin, unittest.
         """Get an expected reducer output based on the input."""
         expected_output = {
             "Problem Display Name": answer_data.get('problem_display_name') or "",
-            "First Response Count": 1 if answer_data.get('is_first', False) else 0,
-            "Last Response Count": 1 if not answer_data.get('is_first', False) else 0,
+            "First Response Count": int(answer_data.get('is_first_event', False)),
+            "Last Response Count": int(not answer_data.get('is_first_event', False)),
             "PartID": self.answer_id,
             "Question": answer_data.get('question') or "",
             "AnswerValue": answer_data.get('answer') or answer_data.get('answer_value_id') or "",
