@@ -14,7 +14,7 @@ import luigi.s3
 from edx.analytics.tasks.mapreduce import MapReduceJobTask, MapReduceJobTaskMixin
 from edx.analytics.tasks.pathutil import PathSetTask
 from edx.analytics.tasks.url import get_target_from_url, url_path_join
-from edx.analytics.tasks.mysql_load import MysqlInsertTask, MysqlInsertTaskMixin
+from edx.analytics.tasks.mysql_load import MysqlInsertTask
 import edx.analytics.tasks.util.eventlog as eventlog
 import edx.analytics.tasks.util.opaque_key_util as opaque_key_util
 
@@ -638,7 +638,6 @@ class UserVideoSummaryToMySQLTaskWorkflow(
 
 class CourseVideoWorkflow(
     CourseVideoDownstreamMixin,
-    MysqlInsertTaskMixin,
     MapReduceJobTaskMixin,
     luigi.WrapperTask
 ):
