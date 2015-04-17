@@ -17,6 +17,7 @@ from edx.analytics.tasks.url import get_target_from_url, url_path_join
 from edx.analytics.tasks.mysql_load import MysqlInsertTask, MysqlInsertTaskMixin
 import edx.analytics.tasks.util.eventlog as eventlog
 import edx.analytics.tasks.util.opaque_key_util as opaque_key_util
+from edx.analytics.tasks.url import ExternalURL
 
 import logging
 log = logging.getLogger(__name__)
@@ -73,19 +74,29 @@ class CourseVideoEventMixin(object):
     """
 
     def mapper(self, line):
-        """ Docstring """
+        """
+        Common mapper for course video tasks.
+        Ingests a raw log line, parses it according to
+        a pair of key/value getter functions.
+
+        Classes that inherit from this should implement
+        these getter functions.
+        """
         parsed_tuple_or_none = self.parse_log_line(line)
         if parsed_tuple_or_none is not None:
             yield parsed_tuple_or_none
 
     def reducer(self, key, values):
         """
-        Base classes should implement this method
+        Classes that inherit from this should implement this method
         """
         raise NotImplementedError
 
     def parse_log_line(self, line):
-        """ Docstring """
+        """
+        Parses a log line assumed to be in json form
+        and calls key/value getters.
+        """
         try:
             event = json.loads(line)
         except ValueError:
@@ -115,19 +126,29 @@ class CourseVideoEventMixin(object):
 
 
 class CourseVideoSummaryMixin(CourseVideoEventMixin):
-    """ Docstring """
+    """
+    Defines mapper and reducer events that extracts for
+    a given log line the total number of video play actions
+    and number of users that played that video.
+    """
 
     def reducer(self, key, value_gen):
-        """ Docstring """
-        values = [x for x in value_gen]
-        usernames = map(itemgetter(0), values)
+        """
+        For each (course, video, date) tuple, returns
+        the total activity and number of play actions and
+        unique users for that video on that date.
+        """
+        usernames = [x for x in value_gen]
         unique_users = len(set(usernames))
-        total_activity = len(values)
+        total_activity = len(usernames)
         output = (unique_users, total_activity)
         yield key, output
 
     def get_mapper_key(self, event):
-        """ Docstring """
+        """
+        Given a dict representing the log event,
+        returns the key for the mapper and reducer
+        """
         if type(event) != dict:
             return None
 
@@ -155,7 +176,11 @@ class CourseVideoSummaryMixin(CourseVideoEventMixin):
         return (course_id, video_id, date)
 
     def get_mapper_value(self, event):
-        """ Docstring """
+        """
+        Given a dict representing the log event,
+        returns which user played that vidoe
+        """
+
         if type(event) != dict:
             return None
 
@@ -167,8 +192,7 @@ class CourseVideoSummaryMixin(CourseVideoEventMixin):
         if action != "play_video":
             return None
 
-        encoded_action = EVENT_ACTION_MAPPING.get(action)
-        return (username, encoded_action)
+        return username
 
 
 class CourseVideoSeekTimesMixin(CourseVideoEventMixin):
@@ -178,7 +202,15 @@ class CourseVideoSeekTimesMixin(CourseVideoEventMixin):
     """
 
     def reducer(self, key, values):
-        """ Docstring """
+        """
+        For each (course, video, date, seek_interval) tuple,
+        returns the number of seek events and users who seeked
+        to that interval of the video.
+
+        A seek_interval is an Integer representing the number
+        of seconds elapsed since the original video start_Time
+        """
+
         num_seeks = 0
         users = set()
         for value in values:
@@ -189,7 +221,10 @@ class CourseVideoSeekTimesMixin(CourseVideoEventMixin):
         yield key, output
 
     def get_mapper_key(self, event):
-        """ Docstring """
+        """
+        Returns a tuple representing the start of a seek interval,
+        on a given day, for a course/video combo.
+        """
         if type(event) != dict:
             return None
 
@@ -234,7 +269,9 @@ class CourseVideoSeekTimesMixin(CourseVideoEventMixin):
         return (course_id, video_id, date, seek_interval)
 
     def get_mapper_value(self, event):
-        """ Docstring """
+        """
+        Emit the username and timestamp to the reducer for aggregation
+        """
         if type(event) != dict:
             return None
 
@@ -250,10 +287,15 @@ class CourseVideoSeekTimesMixin(CourseVideoEventMixin):
 
 
 class UserVideoSummaryMixin(CourseVideoEventMixin):
-    """ Docstring """
+    """
+    For each user in each course that he or she is enrolled in,
+    calculates the daily video usage. Daily usage includes how much
+    time the user has spent watching a video, number of unique videos
+    watched, and the total activity for a given task.
+    """
 
     def reducer(self, key, value_gen):
-        """ Docstring """
+        """ Given a """
         values = [value for value in value_gen]
         total_activity = len(values)
         video_ids = map(itemgetter(0), values)
@@ -425,6 +467,52 @@ class UserVideoSummaryTask(
         return get_target_from_url(url_path_join(self.dest, output_name))
 
 
+# pylint: disable=abstract-method
+class InsertToMysqlCourseVideoSettingsTable(MysqlInsertTask):
+    """
+    Inserts a small table into MySQL to keep track of settings for course
+    video tasks. This allows us to expose the settings from the analytics
+    pipeline codebase to the data-api and other codebases.
+    """
+    def init_copy(self, connection):
+        """
+        Truncate the table before re-writing
+        """
+        # Use "DELETE" instead of TRUNCATE since TRUNCATE forces an implicit commit before it executes which would
+        # commit the currently open transaction before continuing with the copy.
+        query = "DELETE FROM {table}".format(table=self.table)
+        connection.cursor().execute(query)
+
+    def requires(self):
+        self.required_tasks = {
+            'credentials': ExternalURL(url=self.credentials),
+        }
+        return self.required_tasks
+
+    @property
+    def table(self):
+        return 'course_video_settings'
+
+    @property
+    def columns(self):
+        return [
+            ('name', 'VARCHAR(255) NOT NULL'),
+            ('type', 'VARCHAR(255) NOT NULL'),
+            ('value', 'VARCHAR(255) NOT NULL'),
+        ]
+
+    def rows(self):
+        """
+        Inserts key value pairs of settings into the course-video settings table.
+        """
+        settings = [
+            ('seek_interval', 'INTEGER', SEEK_INTERVAL_IN_SEC),
+        ]
+        for setting in settings:
+            yield setting
+
+
+# pylint: disable=abstract-method
 class InsertToMysqlDirectTableBase(MysqlInsertTask):
     """
     Base class for directly inserting into MySQL table results
@@ -524,6 +612,7 @@ class InsertToMysqlCourseVideoSeekTimesTable(InsertToMysqlDirectTableBase):
         ]
 
 
+# pylint: disable=abstract-method
 class InsertToMysqlUserVideoSummaryTable(InsertToMysqlDirectTableBase):
     """
     Define answer_distribution table.
@@ -569,12 +658,13 @@ class CourseVideoSummaryToMySQLTaskWorkflow(
 ):
     """
     Task to launch a pipeline that takes as input a raw event log file, runs
-    the SQL summary task, and outputs to a MySQL database
+    the course video summary task, and outputs to a MySQL database
     """
     @property
     def insert_source_task(self):
         """
-        Write to answer_distribution table from AnswerDistributionTSVTask.
+        Use the output tsvs of CourseVideoSummaryTask as the input to
+        the InsertToMysqlCourseVideoSummaryTable task
         """
         return CourseVideoSummaryTask(
             mapreduce_engine=self.mapreduce_engine,
@@ -595,11 +685,14 @@ class CourseVideoSeekTimesToMySQLTaskWorkflow(
 ):
     """
     Task to launch a pipeline that takes as input a raw event log file, runs
-    the SQL summary task, and outputs to a MySQL database
+    the course video seek times task, and outputs to a MySQL database
     """
     @property
     def insert_source_task(self):
-        """ Docstring """
+        """
+        Use the output tsvs of CourseVideoSummaryTask as the input to
+        the InsertToMysqlCourseVideoSeekTimesTable task
+        """
         return CourseVideoSeekTimesTask(
             mapreduce_engine=self.mapreduce_engine,
             lib_jar=self.lib_jar,
@@ -619,11 +712,14 @@ class UserVideoSummaryToMySQLTaskWorkflow(
 ):
     """
     Task to launch a pipeline that takes as input a raw event log file, runs
-    the SQL summary task, and outputs to a MySQL database
+    the user video summary task, and outputs to a MySQL database
     """
     @property
     def insert_source_task(self):
-        """ Docstring """
+        """
+        Use the output tsvs of UserVideoSummaryTask as the input to
+        the InsertToMysqlUserVideoSummaryTable task
+        """
         return UserVideoSummaryTask(
             mapreduce_engine=self.mapreduce_engine,
             lib_jar=self.lib_jar,
@@ -665,4 +761,9 @@ class CourseVideoWorkflow(
             CourseVideoSummaryToMySQLTaskWorkflow(**kwargs),
             CourseVideoSeekTimesToMySQLTaskWorkflow(**kwargs),
             UserVideoSummaryToMySQLTaskWorkflow(**kwargs),
+            InsertToMysqlCourseVideoSettingsTable(**{
+                'database': self.database,
+                'credentials': self.credentials,
+                'insert_chunk_size': self.insert_chunk_size,
+            }),
         )
